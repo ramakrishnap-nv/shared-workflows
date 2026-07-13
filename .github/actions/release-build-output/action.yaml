@@ -1,0 +1,39 @@
+name: Materialize release build output
+description: Validate a downloaded build artifact bundle and write a release-platform build-output manifest.
+
+inputs:
+  release-unit:
+    description: Release-platform unit ID for every primary artifact in this bundle.
+    required: true
+  release-package:
+    description: JSON package fields shared by the bundle (ecosystem, name, version, and optional build/platform).
+    required: true
+  release-artifacts:
+    description: JSON array of artifact path/evidence descriptors relative to output-directory. Each glob must resolve to exactly one file.
+    required: true
+  output-directory:
+    description: Downloaded GitHub Actions artifact directory that contains the primary files and evidence.
+    required: true
+  manifest-name:
+    description: Filename to write inside output-directory.
+    required: false
+    default: release-build-output.json
+
+outputs:
+  manifest-path:
+    description: Absolute path to the generated manifest.
+    value: ${{ steps.materialize.outputs.manifest-path }}
+
+runs:
+  using: composite
+  steps:
+    - id: materialize
+      name: Materialize release build-output manifest
+      shell: bash
+      env:
+        RELEASE_ARTIFACTS: ${{ inputs.release-artifacts }}
+        RELEASE_MANIFEST_NAME: ${{ inputs.manifest-name }}
+        RELEASE_OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
+        RELEASE_PACKAGE: ${{ inputs.release-package }}
+        RELEASE_UNIT: ${{ inputs.release-unit }}
+      run: ${{ github.action_path }}/materialize.sh

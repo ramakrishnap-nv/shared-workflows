@@ -20,6 +20,47 @@ Reusable workflows must be placed in the `.github/workflows` directory as mentio
 
 ## Usage
 
+### release-build-output
+
+`release-build-output.yaml` enrolls an existing CI artifact bundle in a staged
+RAPIDS release without putting release logic in the product build script. Add
+one companion job for each producing artifact bundle (and use the same matrix
+when the producer is matrixed). It downloads the existing GitHub Actions
+artifact, verifies the declared primary file and evidence sidecars, and uploads
+one companion artifact named `release-build-output-<artifact-name>`.
+
+The build job must already upload the primary artifact, SBOM, and provenance in
+the same GitHub Actions artifact bundle. The only per-product configuration is
+the release unit, one shared package object, and relative paths or globs for
+the artifact/evidence triples. Each glob must resolve to exactly one downloaded
+file; the workflow never guesses a release artifact.
+
+```yaml
+cuvs-java-release-output:
+  needs: java-build
+  uses: rapidsai/shared-workflows/.github/workflows/release-build-output.yaml@main
+  with:
+    artifact-name: cuvs-java-cuda12.9.1
+    release-unit: maven:cuvs-java
+    release-package: >-
+      {"ecosystem":"maven","name":"ai.rapids:cuvs-java","version":"26.08.0"}
+    release-artifacts: >-
+      [{"path":"cuvs-java-26.08.0.jar",
+        "sbom":"cuvs-java-26.08.0.spdx.json",
+        "provenance":"cuvs-java-26.08.0.provenance.json"}]
+```
+
+For a matrixed build, copy the producer's matrix and use the same
+matrix-qualified `artifact-name`. A descriptor may include a `package` object
+to override only package fields that vary by artifact, such as `platform`; the
+shared `release-package` fields are inherited. This avoids repeating the
+ecosystem, name, and version for every artifact in a bundle.
+
+The release coordinator downloads both artifacts into the same directory, for
+example `release-build-outputs/cuvs-java/cuda12.9.1/`. The resulting tree has
+one `release-build-output.json` per producer job and is consumed directly by
+`rapids-release shadow file`. It does not require Artifactory.
+
 ### matrix_filter
 
 Several of the workflows in this project have matrices (combinations of workflow inputs) expressed in inline YAML/JSON.

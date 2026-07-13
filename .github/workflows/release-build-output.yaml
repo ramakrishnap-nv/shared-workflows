@@ -1,0 +1,74 @@
+name: Materialize release build output
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: Name of the existing GitHub Actions artifact bundle to manifest.
+        required: true
+        type: string
+      release-unit:
+        description: Release-platform unit ID for every primary artifact in this bundle.
+        required: true
+        type: string
+      release-package:
+        description: JSON package fields shared by the bundle (ecosystem, name, version, and optional build/platform).
+        required: true
+        type: string
+      release-artifacts:
+        description: JSON array of artifact path/evidence descriptors relative to the downloaded artifact bundle.
+        required: true
+        type: string
+      manifest-name:
+        description: Filename to write in the bundle and upload as the companion manifest artifact.
+        required: false
+        default: release-build-output.json
+        type: string
+
+    outputs:
+      manifest-artifact-name:
+        description: GitHub Actions artifact containing the generated manifest.
+        value: ${{ jobs.manifest.outputs.manifest-artifact-name }}
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    outputs:
+      manifest-artifact-name: ${{ steps.manifest-artifact.outputs.name }}
+    steps:
+      - name: Download build artifact bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: release-build-output
+      - name: Check out this workflow's manifest action
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: release-build-output-action
+          sparse-checkout: .github/actions/release-build-output
+          sparse-checkout-cone-mode: false
+      - name: Materialize manifest
+        uses: ./release-build-output-action/.github/actions/release-build-output
+        with:
+          output-directory: release-build-output
+          manifest-name: ${{ inputs.manifest-name }}
+          release-artifacts: ${{ inputs.release-artifacts }}
+          release-package: ${{ inputs.release-package }}
+          release-unit: ${{ inputs.release-unit }}
+      - id: manifest-artifact
+        name: Set companion artifact name
+        env:
+          ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        run: echo "name=release-build-output-${ARTIFACT_NAME}" >> "${GITHUB_OUTPUT}"
+      - name: Upload release build-output manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.manifest-artifact.outputs.name }}
+          path: release-build-output/${{ inputs.manifest-name }}
+          if-no-files-found: error
