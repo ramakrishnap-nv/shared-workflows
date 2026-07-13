@@ -24,6 +24,11 @@ on:
         required: false
         default: release-build-output.json
         type: string
+      metadata-name:
+        description: Filename for the reserved build-environment metadata envelope.
+        required: false
+        default: release-build-metadata.json
+        type: string
 
     outputs:
       manifest-artifact-name:
@@ -51,6 +56,7 @@ jobs:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           path: release-build-output-action
+          persist-credentials: false
           sparse-checkout: .github/actions/release-build-output
           sparse-checkout-cone-mode: false
       - name: Materialize manifest
@@ -58,17 +64,21 @@ jobs:
         with:
           output-directory: release-build-output
           manifest-name: ${{ inputs.manifest-name }}
+          metadata-name: ${{ inputs.metadata-name }}
           release-artifacts: ${{ inputs.release-artifacts }}
           release-package: ${{ inputs.release-package }}
+          source-artifact-name: ${{ inputs.artifact-name }}
           release-unit: ${{ inputs.release-unit }}
       - id: manifest-artifact
         name: Set companion artifact name
         env:
           ARTIFACT_NAME: ${{ inputs.artifact-name }}
         run: echo "name=release-build-output-${ARTIFACT_NAME}" >> "${GITHUB_OUTPUT}"
-      - name: Upload release build-output manifest
+      - name: Upload release build-output records
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.manifest-artifact.outputs.name }}
-          path: release-build-output/${{ inputs.manifest-name }}
+          path: |
+            release-build-output/${{ inputs.manifest-name }}
+            release-build-output/${{ inputs.metadata-name }}
           if-no-files-found: error

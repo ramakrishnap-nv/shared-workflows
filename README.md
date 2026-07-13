@@ -61,6 +61,15 @@ example `release-build-outputs/cuvs-java/cuda12.9.1/`. The resulting tree has
 one `release-build-output.json` per producer job and is consumed directly by
 `rapids-release shadow file`. It does not require Artifactory.
 
+The companion artifact also carries `release-build-metadata.json`. This is an
+intentionally inert extension point for a future metadata collector: it records
+the artifact identity, the manifest filename, and GitHub build identity, while
+leaving `metadata` empty. The release platform does not read it yet. SBOM and
+provenance paths remain authoritative in `release-build-output.json`, so the
+stub does not duplicate evidence. A future SBOM/build-environment collector can
+extend this sidecar without changing the release manifest or product build job
+contract.
+
 ### matrix_filter
 
 Several of the workflows in this project have matrices (combinations of workflow inputs) expressed in inline YAML/JSON.

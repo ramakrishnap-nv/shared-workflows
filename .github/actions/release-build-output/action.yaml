@@ -18,11 +18,21 @@ inputs:
     description: Filename to write inside output-directory.
     required: false
     default: release-build-output.json
+  metadata-name:
+    description: Filename for the reserved build-environment metadata envelope inside output-directory.
+    required: false
+    default: release-build-metadata.json
+  source-artifact-name:
+    description: Name of the GitHub Actions artifact bundle that supplied this output.
+    required: true
 
 outputs:
   manifest-path:
     description: Absolute path to the generated manifest.
     value: ${{ steps.materialize.outputs.manifest-path }}
+  metadata-path:
+    description: Absolute path to the reserved build-environment metadata envelope.
+    value: ${{ steps.materialize.outputs.metadata-path }}
 
 runs:
   using: composite
@@ -33,7 +43,9 @@ runs:
       env:
         RELEASE_ARTIFACTS: ${{ inputs.release-artifacts }}
         RELEASE_MANIFEST_NAME: ${{ inputs.manifest-name }}
+        RELEASE_METADATA_NAME: ${{ inputs.metadata-name }}
         RELEASE_OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
         RELEASE_PACKAGE: ${{ inputs.release-package }}
+        RELEASE_SOURCE_ARTIFACT_NAME: ${{ inputs.source-artifact-name }}
         RELEASE_UNIT: ${{ inputs.release-unit }}
       run: ${{ github.action_path }}/materialize.sh

@@ -16,3 +16,8 @@ paths:
       # ${{ secrets.CODECOV_TOKEN }} is valid if a secret like that exists in the calling repo,
       # and we're confident that it's there in our repos, so this error can be silenced
       - 'property "codecov_token" is not defined in object type'
+  .github/workflows/release-build-output.yaml:
+    ignore:
+      # GitHub exposes job.workflow_* to reusable workflows. actionlint 1.7.12
+      # does not yet model those two documented context properties.
+      - 'property "workflow_(repository|sha)" is not defined in object type'

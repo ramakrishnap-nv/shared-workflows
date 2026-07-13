@@ -15,11 +15,24 @@ require_nonempty() {
 require_nonempty "RELEASE_UNIT" "${RELEASE_UNIT:-}"
 require_nonempty "RELEASE_OUTPUT_DIRECTORY" "${RELEASE_OUTPUT_DIRECTORY:-}"
 require_nonempty "RELEASE_MANIFEST_NAME" "${RELEASE_MANIFEST_NAME:-}"
+require_nonempty "RELEASE_METADATA_NAME" "${RELEASE_METADATA_NAME:-}"
 require_nonempty "RELEASE_PACKAGE" "${RELEASE_PACKAGE:-}"
 require_nonempty "RELEASE_ARTIFACTS" "${RELEASE_ARTIFACTS:-}"
+require_nonempty "RELEASE_SOURCE_ARTIFACT_NAME" "${RELEASE_SOURCE_ARTIFACT_NAME:-}"
 
-if [[ "${RELEASE_MANIFEST_NAME}" == */* || "${RELEASE_MANIFEST_NAME}" == .* || "${RELEASE_MANIFEST_NAME}" == *".."* ]]; then
-  echo "manifest-name must be a plain filename" >&2
+require_plain_filename() {
+  local label="$1"
+  local filename="$2"
+  if [[ "${filename}" == */* || "${filename}" == .* || "${filename}" == *".."* ]]; then
+    echo "${label} must be a plain filename" >&2
+    exit 1
+  fi
+}
+
+require_plain_filename "manifest-name" "${RELEASE_MANIFEST_NAME}"
+require_plain_filename "metadata-name" "${RELEASE_METADATA_NAME}"
+if [[ "${RELEASE_MANIFEST_NAME}" == "${RELEASE_METADATA_NAME}" ]]; then
+  echo "manifest-name and metadata-name must differ" >&2
   exit 1
 fi
 
@@ -48,6 +61,7 @@ fi
 
 output_directory="$(realpath "${RELEASE_OUTPUT_DIRECTORY}")"
 manifest_path="${output_directory}/${RELEASE_MANIFEST_NAME}"
+metadata_path="${output_directory}/${RELEASE_METADATA_NAME}"
 temporary_manifest="$(mktemp "${output_directory}/.release-build-output.XXXXXX")"
 trap 'rm -f "${temporary_manifest}"' EXIT
 
@@ -131,4 +145,29 @@ if ! jq -e '.artifacts as $items | ($items | map([.unit_id, .path] | join("\u000
 fi
 
 jq -S . "${temporary_manifest}" >"${manifest_path}"
+jq -n \
+  --arg artifact_name "${RELEASE_SOURCE_ARTIFACT_NAME}" \
+  --arg manifest_name "${RELEASE_MANIFEST_NAME}" \
+  --arg repository "${GITHUB_REPOSITORY:-}" \
+  --arg run_attempt "${GITHUB_RUN_ATTEMPT:-}" \
+  --arg run_id "${GITHUB_RUN_ID:-}" \
+  --arg sha "${GITHUB_SHA:-}" \
+  --arg unit_id "${RELEASE_UNIT}" \
+  --arg workflow_ref "${GITHUB_WORKFLOW_REF:-}" \
+  '{
+    schema_version: 1,
+    producer: "shared-workflows",
+    release_unit: $unit_id,
+    source_artifact: $artifact_name,
+    build_output_manifest: $manifest_name,
+    build_environment: {
+      repository: $repository,
+      sha: $sha,
+      workflow_ref: $workflow_ref,
+      run_id: $run_id,
+      run_attempt: $run_attempt
+    },
+    metadata: {}
+  }' | jq -S . >"${metadata_path}"
 echo "manifest-path=${manifest_path}" >>"${GITHUB_OUTPUT}"
+echo "metadata-path=${metadata_path}" >>"${GITHUB_OUTPUT}"
