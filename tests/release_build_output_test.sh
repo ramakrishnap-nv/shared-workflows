@@ -26,10 +26,11 @@ RELEASE_METADATA_NAME="release-build-metadata.json"
 RELEASE_OUTPUT_DIRECTORY="${bundle_directory}"
 RELEASE_PACKAGE="$(jq -cn '{ecosystem: "maven", name: "ai.rapids:cuvs-java", version: "26.08.0"}')"
 RELEASE_SOURCE_ARTIFACT_NAME="cuvs-java-cuda12.9.1"
+RELEASE_SOURCE_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 RELEASE_UNIT="maven:cuvs-java"
 export GITHUB_REPOSITORY GITHUB_RUN_ATTEMPT GITHUB_RUN_ID GITHUB_SHA GITHUB_WORKFLOW_REF
 export RELEASE_ARTIFACTS RELEASE_MANIFEST_NAME RELEASE_METADATA_NAME RELEASE_OUTPUT_DIRECTORY RELEASE_PACKAGE
-export RELEASE_SOURCE_ARTIFACT_NAME RELEASE_UNIT
+export RELEASE_SOURCE_ARTIFACT_NAME RELEASE_SOURCE_SHA RELEASE_UNIT
 
 "${repository_root}/.github/actions/release-build-output/materialize.sh"
 
@@ -50,7 +51,67 @@ jq -e '
   and .source_artifact == "cuvs-java-cuda12.9.1"
   and .build_output_manifest == "release-build-output.json"
   and .build_environment.repository == "rapidsai/cuvs"
+  and .build_environment.sha == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   and .metadata == {}
 ' "${metadata_path}" >/dev/null
 grep -Fx "manifest-path=${manifest_path}" "${GITHUB_OUTPUT}"
 grep -Fx "metadata-path=${metadata_path}" "${GITHUB_OUTPUT}"
+
+generated_directory="${temporary_directory}/generated-bundle"
+mkdir -p "${generated_directory}/linux-64"
+printf '%s\n' conda >"${generated_directory}/linux-64/kvikio-26.08.00a32-cuda12_260714_2f567060.conda"
+
+RELEASE_ARTIFACTS="$(jq -cn '[{path: "linux-64/kvikio-*.conda"}]')"
+RELEASE_OUTPUT_DIRECTORY="${generated_directory}"
+RELEASE_PACKAGE="$(jq -cn '{ecosystem: "conda", name: "kvikio"}')"
+RELEASE_SOURCE_ARTIFACT_NAME="kvikio_conda_python_kvikio_x86_64_abi3_cu12"
+RELEASE_SOURCE_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+RELEASE_UNIT="conda:kvikio"
+export RELEASE_ARTIFACTS RELEASE_OUTPUT_DIRECTORY RELEASE_PACKAGE RELEASE_SOURCE_ARTIFACT_NAME RELEASE_SOURCE_SHA RELEASE_UNIT
+
+"${repository_root}/.github/actions/release-build-output/materialize.sh"
+
+generated_manifest_path="${generated_directory}/release-build-output.json"
+generated_metadata_path="${generated_directory}/release-build-metadata.json"
+generated_sbom_path="$(jq -r '.artifacts[0].sbom' "${generated_manifest_path}")"
+generated_provenance_path="$(jq -r '.artifacts[0].provenance' "${generated_manifest_path}")"
+jq -e '
+  .artifacts[0].unit_id == "conda:kvikio"
+  and .artifacts[0].path == "linux-64/kvikio-26.08.00a32-cuda12_260714_2f567060.conda"
+  and .artifacts[0].package == {ecosystem: "conda", name: "kvikio", version: "26.08.00a32"}
+' "${generated_manifest_path}" >/dev/null
+jq -e '
+  .spdxVersion == "SPDX-2.3"
+  and .packages[0].name == "kvikio"
+  and .packages[0].versionInfo == "26.08.00a32"
+' "${generated_directory}/${generated_sbom_path}" >/dev/null
+jq -e '
+  .predicateType == "https://slsa.dev/provenance/v1"
+  and .predicate.buildDefinition.externalParameters.release_unit == "conda:kvikio"
+  and .predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+' "${generated_directory}/${generated_provenance_path}" >/dev/null
+jq -e '
+  .release_unit == "conda:kvikio"
+  and .source_artifact == "kvikio_conda_python_kvikio_x86_64_abi3_cu12"
+  and .build_environment.sha == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+' "${generated_metadata_path}" >/dev/null
+
+wheel_directory="${temporary_directory}/wheel-bundle"
+mkdir -p "${wheel_directory}"
+printf '%s\n' wheel >"${wheel_directory}/libkvikio_cu12-26.8.0a32-py3-none-manylinux_2_28_x86_64.whl"
+
+RELEASE_ARTIFACTS="$(jq -cn '[{path: "libkvikio_cu12-*.whl"}]')"
+RELEASE_OUTPUT_DIRECTORY="${wheel_directory}"
+RELEASE_PACKAGE="$(jq -cn '{ecosystem: "wheel", name: "libkvikio-cu12"}')"
+RELEASE_SOURCE_ARTIFACT_NAME="kvikio_wheel_cpp_libkvikio_x86_64_cu12"
+RELEASE_SOURCE_SHA="cccccccccccccccccccccccccccccccccccccccc"
+RELEASE_UNIT="wheel:kvikio"
+export RELEASE_ARTIFACTS RELEASE_OUTPUT_DIRECTORY RELEASE_PACKAGE RELEASE_SOURCE_ARTIFACT_NAME RELEASE_SOURCE_SHA RELEASE_UNIT
+
+"${repository_root}/.github/actions/release-build-output/materialize.sh"
+
+jq -e '
+  .artifacts[0].unit_id == "wheel:kvikio"
+  and .artifacts[0].path == "libkvikio_cu12-26.8.0a32-py3-none-manylinux_2_28_x86_64.whl"
+  and .artifacts[0].package == {ecosystem: "wheel", name: "libkvikio-cu12", version: "26.8.0a32"}
+' "${wheel_directory}/release-build-output.json" >/dev/null

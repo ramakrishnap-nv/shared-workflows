@@ -12,11 +12,11 @@ on:
         required: true
         type: string
       release-package:
-        description: JSON package fields shared by the bundle (ecosystem, name, version, and optional build/platform).
+        description: JSON package fields shared by the bundle (ecosystem and name required; version may be inferred from a Conda or wheel filename).
         required: true
         type: string
       release-artifacts:
-        description: JSON array of artifact path/evidence descriptors relative to the downloaded artifact bundle.
+        description: JSON array of artifact/evidence descriptors relative to the downloaded artifact bundle. Missing SBOM/provenance sidecars are generated as artifact-identity envelopes.
         required: true
         type: string
       manifest-name:
@@ -28,6 +28,10 @@ on:
         description: Filename for the reserved build-environment metadata envelope.
         required: false
         default: release-build-metadata.json
+        type: string
+      source-sha:
+        description: Source revision built by the producing job. Defaults to the caller workflow SHA.
+        required: false
         type: string
 
     outputs:
@@ -68,6 +72,7 @@ jobs:
           release-artifacts: ${{ inputs.release-artifacts }}
           release-package: ${{ inputs.release-package }}
           source-artifact-name: ${{ inputs.artifact-name }}
+          source-sha: ${{ inputs.source-sha || github.sha }}
           release-unit: ${{ inputs.release-unit }}
       - id: manifest-artifact
         name: Set companion artifact name
@@ -81,4 +86,5 @@ jobs:
           path: |
             release-build-output/${{ inputs.manifest-name }}
             release-build-output/${{ inputs.metadata-name }}
+            release-build-output/release-evidence/**
           if-no-files-found: error

@@ -6,10 +6,10 @@ inputs:
     description: Release-platform unit ID for every primary artifact in this bundle.
     required: true
   release-package:
-    description: JSON package fields shared by the bundle (ecosystem, name, version, and optional build/platform).
+    description: JSON package fields shared by the bundle (ecosystem and name required; version may be inferred from a Conda or wheel filename).
     required: true
   release-artifacts:
-    description: JSON array of artifact path/evidence descriptors relative to output-directory. Each glob must resolve to exactly one file.
+    description: JSON array of artifact/evidence descriptors relative to output-directory. Each primary path glob must resolve to exactly one file; omitted SBOM/provenance sidecars are generated as artifact-identity envelopes.
     required: true
   output-directory:
     description: Downloaded GitHub Actions artifact directory that contains the primary files and evidence.
@@ -25,6 +25,9 @@ inputs:
   source-artifact-name:
     description: Name of the GitHub Actions artifact bundle that supplied this output.
     required: true
+  source-sha:
+    description: Source revision built by the producing job. Defaults to the current GitHub workflow SHA.
+    required: false
 
 outputs:
   manifest-path:
@@ -47,5 +50,6 @@ runs:
         RELEASE_OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
         RELEASE_PACKAGE: ${{ inputs.release-package }}
         RELEASE_SOURCE_ARTIFACT_NAME: ${{ inputs.source-artifact-name }}
+        RELEASE_SOURCE_SHA: ${{ inputs.source-sha || github.sha }}
         RELEASE_UNIT: ${{ inputs.release-unit }}
       run: ${{ github.action_path }}/materialize.sh

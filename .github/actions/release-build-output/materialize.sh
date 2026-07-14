@@ -20,6 +20,9 @@ require_nonempty "RELEASE_PACKAGE" "${RELEASE_PACKAGE:-}"
 require_nonempty "RELEASE_ARTIFACTS" "${RELEASE_ARTIFACTS:-}"
 require_nonempty "RELEASE_SOURCE_ARTIFACT_NAME" "${RELEASE_SOURCE_ARTIFACT_NAME:-}"
 
+source_sha="${RELEASE_SOURCE_SHA:-${GITHUB_SHA:-}}"
+require_nonempty "RELEASE_SOURCE_SHA or GITHUB_SHA" "${source_sha}"
+
 require_plain_filename() {
   local label="$1"
   local filename="$2"
@@ -46,11 +49,11 @@ if ! jq -e '
   and (keys - ["ecosystem", "name", "version", "build", "platform"] | length == 0)
   and (.ecosystem | type == "string" and length > 0)
   and (.name | type == "string" and length > 0)
-  and (.version | type == "string" and length > 0)
+  and ((.version // "") | type == "string")
   and ((.build // "") | type == "string")
   and ((.platform // "") | type == "string")
 ' <<<"${RELEASE_PACKAGE}" >/dev/null; then
-  echo "release-package must be a package object with ecosystem, name, and version" >&2
+  echo "release-package must be a package object with ecosystem and name; version is optional for Conda and wheel artifacts" >&2
   exit 1
 fi
 
@@ -99,30 +102,176 @@ resolve_one_file() {
   printf '%s\n' "${resolved#"${output_directory}/"}"
 }
 
+derive_package_version() {
+  local ecosystem="$1"
+  local package_name="$2"
+  local artifact_path="$3"
+  local filename
+  filename="$(basename "${artifact_path}")"
+
+  case "${ecosystem}" in
+    conda)
+      local conda_prefix="${package_name}-"
+      if [[ "${filename}" != "${conda_prefix}"* ]]; then
+        echo "Conda artifact filename does not start with package name '${package_name}': ${filename}" >&2
+        exit 1
+      fi
+      local conda_remainder="${filename#"${conda_prefix}"}"
+      local conda_version="${conda_remainder%%-*}"
+      if [[ -z "${conda_version}" || "${conda_version}" == "${conda_remainder}" ]]; then
+        echo "cannot derive Conda package version from artifact filename: ${filename}" >&2
+        exit 1
+      fi
+      printf '%s\n' "${conda_version}"
+      ;;
+    wheel)
+      local wheel_prefix="${package_name//-/_}-"
+      if [[ "${filename}" != "${wheel_prefix}"* ]]; then
+        echo "wheel artifact filename does not start with normalized package name '${package_name}': ${filename}" >&2
+        exit 1
+      fi
+      local wheel_remainder="${filename#"${wheel_prefix}"}"
+      local wheel_version="${wheel_remainder%%-*}"
+      if [[ -z "${wheel_version}" || "${wheel_version}" == "${wheel_remainder}" ]]; then
+        echo "cannot derive wheel package version from artifact filename: ${filename}" >&2
+        exit 1
+      fi
+      printf '%s\n' "${wheel_version}"
+      ;;
+    *)
+      echo "release-package version is required for ${ecosystem} artifacts" >&2
+      exit 1
+      ;;
+  esac
+}
+
+generated_evidence_path() {
+  local primary_path="$1"
+  local kind="$2"
+  local artifact_digest
+  artifact_digest="$(sha256sum "${output_directory}/${primary_path}" | awk '{print $1}')"
+  local artifact_label="${primary_path//\//_}"
+  printf 'release-evidence/%s.%s.%s.json\n' "${artifact_label}" "${artifact_digest}" "${kind}"
+}
+
+write_generated_sbom() {
+  local primary_path="$1"
+  local package="$2"
+  local destination="$3"
+  local artifact_digest
+  artifact_digest="$(sha256sum "${output_directory}/${primary_path}" | awk '{print $1}')"
+  mkdir -p "$(dirname "${output_directory}/${destination}")"
+  jq -n \
+    --arg artifact_digest "${artifact_digest}" \
+    --arg artifact_path "${primary_path}" \
+    --argjson package "${package}" \
+    '{
+      spdxVersion: "SPDX-2.3",
+      dataLicense: "CC0-1.0",
+      SPDXID: "SPDXRef-DOCUMENT",
+      name: ("RAPIDS release artifact " + $artifact_path),
+      documentNamespace: ("https://rapids.ai/release-platform/spdx/" + $artifact_digest),
+      creationInfo: {
+        creators: ["Tool: rapidsai/shared-workflows release-build-output"],
+        created: (now | strftime("%Y-%m-%dT%H:%M:%SZ"))
+      },
+      documentDescribes: ["SPDXRef-Artifact"],
+      packages: [{
+        SPDXID: "SPDXRef-Artifact",
+        name: $package.name,
+        versionInfo: $package.version,
+        downloadLocation: "NOASSERTION",
+        filesAnalyzed: false,
+        checksums: [{algorithm: "SHA256", checksumValue: $artifact_digest}]
+      }],
+      relationships: [{
+        spdxElementId: "SPDXRef-DOCUMENT",
+        relationshipType: "DESCRIBES",
+        relatedSpdxElement: "SPDXRef-Artifact"
+      }],
+      comment: "Artifact-identity SBOM envelope. A producer-supplied dependency SBOM may replace this record."
+    }' | jq -S . >"${output_directory}/${destination}"
+}
+
+write_generated_provenance() {
+  local primary_path="$1"
+  local package="$2"
+  local destination="$3"
+  local artifact_digest
+  artifact_digest="$(sha256sum "${output_directory}/${primary_path}" | awk '{print $1}')"
+  mkdir -p "$(dirname "${output_directory}/${destination}")"
+  jq -n \
+    --arg artifact_digest "${artifact_digest}" \
+    --arg artifact_path "${primary_path}" \
+    --arg repository "${GITHUB_REPOSITORY:-}" \
+    --arg run_attempt "${GITHUB_RUN_ATTEMPT:-}" \
+    --arg run_id "${GITHUB_RUN_ID:-}" \
+    --arg source_sha "${source_sha}" \
+    --arg workflow_ref "${GITHUB_WORKFLOW_REF:-}" \
+    --argjson package "${package}" \
+    '{
+      _type: "https://in-toto.io/Statement/v1",
+      subject: [{name: $artifact_path, digest: {sha256: $artifact_digest}}],
+      predicateType: "https://slsa.dev/provenance/v1",
+      predicate: {
+        buildDefinition: {
+          buildType: "https://rapids.ai/release-platform/build-output/v1",
+          externalParameters: {release_unit: env.RELEASE_UNIT, package: $package},
+          resolvedDependencies: [{
+            uri: ("git+https://github.com/" + $repository + "@" + $source_sha),
+            digest: {gitCommit: $source_sha}
+          }]
+        },
+        runDetails: {
+          builder: {id: ("https://github.com/" + $workflow_ref)},
+          metadata: {invocationId: ("https://github.com/" + $repository + "/actions/runs/" + $run_id + "/attempts/" + $run_attempt)}
+        }
+      }
+    }' | jq -S . >"${output_directory}/${destination}"
+}
+
 shopt -s globstar nullglob
 while IFS= read -r descriptor; do
   if ! jq -e '
     type == "object"
     and (keys - ["path", "sbom", "provenance", "signature", "package"] | length == 0)
     and (.path | type == "string" and length > 0)
-    and (.sbom | type == "string" and length > 0)
-    and (.provenance | type == "string" and length > 0)
+    and ((.sbom // "") | type == "string")
+    and ((.provenance // "") | type == "string")
     and ((.signature // "") | type == "string")
     and ((.package // {}) | type == "object")
     and ((.package // {} | keys - ["ecosystem", "name", "version", "build", "platform"]) | length == 0)
     and ((.package // {} | to_entries | map(.value | type == "string" and length > 0) | all))
   ' <<<"${descriptor}" >/dev/null; then
-    echo "every release-artifacts entry must contain path, sbom, provenance, and optional signature/package overrides" >&2
+    echo "every release-artifacts entry must contain path and optional SBOM/provenance/signature/package overrides" >&2
     exit 1
   fi
 
   primary_path="$(resolve_one_file path "$(jq -r '.path' <<<"${descriptor}")")"
-  sbom_path="$(resolve_one_file sbom "$(jq -r '.sbom' <<<"${descriptor}")")"
-  provenance_path="$(resolve_one_file provenance "$(jq -r '.provenance' <<<"${descriptor}")")"
+  sbom_pattern="$(jq -r '.sbom // empty' <<<"${descriptor}")"
+  provenance_pattern="$(jq -r '.provenance // empty' <<<"${descriptor}")"
   signature_pattern="$(jq -r '.signature // empty' <<<"${descriptor}")"
   package_override="$(jq -c '.package // {}' <<<"${descriptor}")"
 
   package="$(jq -cn --argjson base "${RELEASE_PACKAGE}" --argjson override "${package_override}" '$base + $override')"
+  package_version="$(jq -r '.version // empty' <<<"${package}")"
+  if [[ -z "${package_version}" ]]; then
+    package_version="$(derive_package_version "$(jq -r '.ecosystem' <<<"${package}")" "$(jq -r '.name' <<<"${package}")" "${primary_path}")"
+    package="$(jq -c --arg version "${package_version}" '. + {version: $version}' <<<"${package}")"
+  fi
+
+  if [[ -n "${sbom_pattern}" ]]; then
+    sbom_path="$(resolve_one_file sbom "${sbom_pattern}")"
+  else
+    sbom_path="$(generated_evidence_path "${primary_path}" "spdx")"
+    write_generated_sbom "${primary_path}" "${package}" "${sbom_path}"
+  fi
+  if [[ -n "${provenance_pattern}" ]]; then
+    provenance_path="$(resolve_one_file provenance "${provenance_pattern}")"
+  else
+    provenance_path="$(generated_evidence_path "${primary_path}" "provenance")"
+    write_generated_provenance "${primary_path}" "${package}" "${provenance_path}"
+  fi
   artifact="$(jq -cn \
     --arg unit_id "${RELEASE_UNIT}" \
     --arg path "${primary_path}" \
@@ -151,7 +300,7 @@ jq -n \
   --arg repository "${GITHUB_REPOSITORY:-}" \
   --arg run_attempt "${GITHUB_RUN_ATTEMPT:-}" \
   --arg run_id "${GITHUB_RUN_ID:-}" \
-  --arg sha "${GITHUB_SHA:-}" \
+  --arg sha "${source_sha}" \
   --arg unit_id "${RELEASE_UNIT}" \
   --arg workflow_ref "${GITHUB_WORKFLOW_REF:-}" \
   '{
